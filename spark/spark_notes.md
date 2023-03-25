@@ -179,15 +179,120 @@ Read => Process => Write
     .option("mode", "failfast")
     .schema(mySchema)
     .load()
+    
+  #short cut
+  spark.read.csv(path).option(...).schema(mySchema)
   ```
 
   * Read modes (`option("mode", "failfast")`)
     * permissive
-    * dropmalformed
-    * failfast
+    * dropmalformed (drop malformed data)
+    * failfast (raise execption when encouter malformed data)
+  * There are shortcut but recommend to use the standard form with `load()`
+  
+  * For csv file format, we can inferschema but it may not capture all schema right, use string as default
+  * For json file format, schema is auto inferred but it may not capture all schema right, use string as default
+  * parquet file has schema information build-in the data
+  * Recommended to use parquet file format for spark data processing
 
+* Spark DataFrame Schema
+  * Datatype (spark type, scala types), we use spark type to define schema
+  * spark schema
+    * programmatically: StructType and StructField
+    * SchemaDDL: `"""FL_Date Date, City STRING, count TIME"""`
+  
+* Spark DataFrame writer
+  * settings
+    * format: default is `parquet`
+    * mode (saveMode: append, overwrite, errorifExists, ignore)
+      * `overwrite` mode will also clean the dir before write to it
+    * option
+    * save
+  * How to find number of parition of a dataframe?
+    ```python
+    # show number of partitions
+    df.rdd.getNumPartitions()
+    # show num of record per partition
+    df.gropuby(spark_partition_id()).count().show()
+    ```
+  * control write partition
+    * `.repartition(n)` (blindly)
+    * `.partitionBy(co1, co2, ...)` break logically
+    * `.bucketBy(n, col1, col2)` based on file
+    * `sortBy()`
+    * `maxRecordsPerFile` control the filesize based on record number
+  * random equal partition (use `.repartition(n)`) may not be the optimal solution, it enables the parallel processing but it does not take advantage of partition elimination. break logically with `.partitionBy(col...)` often is more optimal
+  * use `option("maxRecordsPerFile", 10000)` to cap file size
+  
+  * To enable spark to read and write avro file format we need to enable jar in `spark-default.conf`
+    ```
+    spark.jars.packages org.apache.spark:spark-avro_2.11:2.4.5
+    ```
 
+* Spark databases and tables
+  * Tables: has both table data and table metadata (catalog metastore)
+    * Managed tables: 1. create table, save its metadata, 2. save table to a predefined warehouse directory location (which cannot change at the runtime)
+    * unmanaged tables (external tables): 1. creat table, save its metadata (need to define data physical location)
+  * Views: only has metadata (catalog metastore)
+  * To create managed table
 
-# Learning Reference:
+    ```python
+    spark = SparkSession \
+      .builder \
+      .master("local[3]") \
+      .appName("myapp") \
+      # To enable hive support
+      .enableHiveSupport() \ 
+      .getOrCreat()
+    
+    # define database name
+    spark.catalog.setCurrentDatabase("DatabaseName")
+    
+    df.write \
+      .mode("overwrite") \
+      #.partitionBy("col1", "col2") \ # do not partition with col has too many unique values
+      #bucketBy is better since we have control on # of partition
+      .bucketBy(5, "col1", "col2") \ 
+      .sortBy("col1", "col2")
+      .saveAsTable("mytable")
+     #.saveAsTable("DatabaseName.mytable") if database name is note defined above 
+    ```
+
+## Spark Dataframe and Dataset Transformation
+
+* Spark represent data source with 2 interfaces
+  * Data Frame (programatic)
+  * Data table (SQL)
+  * Transformation can also perform based on 2 interfaces
+* Working with Row
+  * Manually creating Rows and Dataframe
+  
+    ```python
+    # create sample data
+    my_schema = StructType([
+      StructField("ID", StringType())
+      StructField("EventDate", StringType())
+    ])
+    
+    my_rows = [Row("123", "01/01/2022"), 
+               Row("124", "02/01/2022")
+               Row("125", "02/15/2022")
+               Row("126", "03/05/2022")]
+    my_rdd = spark.sparkContext.parallelize(my_rows, 2)
+    my_df = spark.createDataFrame(my_rdd, my_schema)
+    ```
+
+  * Collecting Dataframe rows to driver
+  * work with individual row in spark transformation
+  * Note: we cannot assert dataframe in unit test or pytest. We need to bring to driver use `collect()`
+  
+    ```python
+    rows = df(...).collect():w
+    
+    for row in rows:
+      assert row['col'] == value
+    ```
+
+## Learning Reference:
 
 * [Spark Programming](https://github.com/LearningJournal/Spark-Programming-In-Python.git)

@@ -2,8 +2,7 @@
 """colab_rest_api.ipynb
 
 Setup rest api in google colab
-Original file is located at
-    https://colab.research.google.com/drive/colab_id
+Original file is a colab notebook
 """
 import numpy as np
 import pickle
