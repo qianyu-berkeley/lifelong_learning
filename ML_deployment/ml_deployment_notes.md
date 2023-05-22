@@ -23,7 +23,7 @@
 * Upload pickle files
 * run colab notebook
 
-**Note: recommend to use postman for api testing**
+**Note: use postman for api testing**
 
 
 ## Approach 3: Tensorflow Serving
@@ -92,7 +92,7 @@
 
 * we can also store a model (pickel) binary to a postgres database
 
-# MLOps
+## MLOps
 
 * constant training, deployment, evaluation, retraining, monitoring (experiment tracking)
 * ML Lifecycle
@@ -104,10 +104,47 @@
   6. Model Deployment: `TF Serviing`, `Flask Reset API`, `serverless`
   7. Model Monitoring: `MLWatcher`
 
-## ML Flow
+### ML Flow
 
 * MLflow Tracking
   * Experiments => Runs => (code version, start/end time, source, parameters, metrics, tags, artifacts)
 * MLflow Projects
 * MLflow Models
 * Model Regsitries
+
+### Sagemaker
+
+It support multiple options and multiple workflows
+
+### 1. [Bring your own algorithm container](https://github.com/aws/amazon-sagemaker-examples/tree/main/advanced_functionality/scikit_bring_your_own)
+
+* To train and host in Sagemaker
+  * serveing with HTTP requests
+* Permissions:
+  * sagemakerFullAccess (To enable Sagemaker notebook or instances)
+  * AmazonEC2ContinerRegisteryFullAccess (To create a new repositories in Amazon ECR)
+* We can choose to use a single image for both train and host or 2 images for train or host, the decision is based on requirements and convenient
+* Setup docker container
+  * Because you can run the same image in training or hosting, Amazon SageMaker runs your container with the argument `train` or `serve`. How your container processes this argument depends on the container:
+  * if we don't define an `ENTRYPOINT` in the Dockerfile so Docker will run the command `train` at training time and `serve` at serving time. In this case, we define these as executable Python scripts, but they could be any program that we want to start in that environment. 
+  * If you specify a program as an `ENTRYPOINT` in the Dockerfile, that program will be run at startup and its first argument will be `train` or `serve`. The program can then look at that argument and decide what to do. 
+  * If you are building separate containers for training and hosting (or building only for one or the other), you can define a program as an `ENTRYPOINT` in the Dockerfile and ignore (or verify) the first argument passed in.
+  * Running training
+
+    ```
+    /opt/ml
+    |-- input => training inputs
+    |   |-- config
+    |   |   |-- hyperparameters.json
+    |   |   `-- resourceConfig.json
+    |   `-- data
+    |       `-- <channel_name>
+    |           `-- <input data>
+    |-- model => training model outputs, also for serving
+    |   `-- <model files>
+    `-- output => training log outputs
+        `-- failure
+    ```
+
+  * Hosting with recommended serving stack
+    HTTP request => nginx (reverse proxy) => gunicom (WSGI HTTP server) => flask (worker)

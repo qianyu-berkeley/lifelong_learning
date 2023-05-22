@@ -6,31 +6,32 @@
 * Allow running each service with its own depedencies in seperate containers
 * Sit on top of OS and hardware
 * Container:
-  * Process | network | mounts 
+  * Process | network | mounts
   * Sharing kernel
   * Virtual machines is more costly, it also contains OS and sits on top of hypervisor. A virtual machine can have multiple containers
   * Life cycle: create => start => stop => start / restart => stop ...
 * Image:
   * Image is package template plan. We can use an image to create mutliple containers
 
-# Create custom docker images
+## Create custom docker images
 
-## Steps
+### Steps
 
-  * Create a docker file
-    * Flow: 
-      1. Specify a base image (e.g. install an OS (possibly pulls from public image) with some default set of programs)
-      2. Run some commands to install some other specific programs by using a temperory container, took a snapshot of temp container to a new temp image and turn off the temp container
-      3. specify a command to run on container start-up by using a temerory container, took a snapshot of temp comtainer to a new final image and turn off temp container
-  * run docker build command
-  * push to docker registry
+* Create a docker file
+  * Flow: 
+    1. Specify a base image with `FROM` (e.g. install an OS (possibly pulls from public image) with some default set of programs)
+    2. Run some commands to install some other specific programs by using a temperory container, took a snapshot of temp container to a new temp image and turn off the temp container
+    3. specify a command to run on container start-up by using a temerory container, took a snapshot of temp comtainer to a new final image and turn off temp container
+* run `docker build ...` command
+* push image to docker registry
 * Docker build operation leverage cache (based on previous steps) so build next time will be much faster
 
 ## Docker file
 
-  * Dockerfile following the format of `instruction` `argument`
-    * Most common instruction are: `FROM`, `RUN`, `CMD`
+* Dockerfile following the format of `instruction argument`
+  * Most common instruction are: `FROM`, `RUN`, `CMD`
   * Example:
+
     ```docker
     FROM Ubuntu
 
@@ -47,18 +48,23 @@
 
     ENTRYPOINT FLASK_APP=/opt/source-code/app.py flask run
     ```
+
 * Build an image from the current folder
+
     ```sh
     docker build .
     ```
+
 * Build using a tag `-t tag_name` and push. The convension for tag name is `user_name/project_name:version`  
+
     ```sh
     docker build Dockerfile -t qianyu88/my_app:latest my_app_directory
     docker push qianyu88/my_app:latest
     ```
-* When define the Docker file, we need to consider dependencies to minimize the rebuild image time. We copy only the necessary file before installation command and copy the files that does not impact installation after to prevent unnecessary image rebuild
 
-* `WORKDIR` : The `WORKDIR` instruction sets the working directory for any `RUN`, `CMD`, `ENTRYPOINT`, `COPY` and `ADD` instructions that follow it in the Dockerfile. If the WORKDIR doesn’t exist, it will be created even if it’s not used in any subsequent Dockerfile instruction.
+* When define the Docker file, we need to consider dependencies to minimize the rebuild image time. We copy only the necessary file **before installation command** and copy the files that does not impact installation after to prevent unnecessary image rebuild
+
+* **`WORKDIR`** : The `WORKDIR` instruction sets the working directory for any `RUN`, `CMD`, `ENTRYPOINT`, `COPY` and `ADD` instructions that follow it in the Dockerfile. If the WORKDIR doesn’t exist, it will be created even if it’s not used in any subsequent Dockerfile instruction.
 
 # Docker run (launch docker applications) details
 
@@ -123,9 +129,11 @@ docker run -it -p 3000:3000 -v /app/node_modules -v $(pwd):/app <image_id>
 ```
 
 ## Attach to a container 
+
 Allow us to access the stdin, stdout, stderr of a container from the terminal
 
 ```bash
+docker run -it simple-prompt-docker bash 
 ```
 
 # `Docker` Commands Summary
@@ -194,7 +202,8 @@ docker run -v /opt/datadir:/var/lib/myseql mysql
 docker run -e APP_COLOR=blue simple-webapp-color
 ```
 
-# Docker Compose
+## Docker Compose
+
 Docker compose can be used to reduce the usage of docker cli and automate actions
 
 We can use it to define and run multi-container apps by composing a file to configure your app's services. Using a single command, create and start all the services from your configuration. With docker-compose, docker will automatically put container (services) under the same network and they can talk to each other freely
@@ -334,13 +343,13 @@ services:
 ```
 
 
-# A Simple CI/CD Flow Concept
+## A Simple CI/CD Flow Concept
 
 1. github links to a CI/CD tool (e.g. travis, Jenkines)
 2. Build the flow use yaml file of CI/CD tool to enable steps of operations 
 3. The steps of operations is triggered by the github update (master branch by default)
 
-## Key files and Depdencies: 
+### Key files and Depdencies: 
 
 * CI/CD Yaml or Jenkinsfile => define CI/CD steps
 * Dockerfiles the used the CI/CD Yaml
@@ -348,7 +357,7 @@ services:
   
 
 
-# `bash` completion
+### `bash` completion
 
 to enable bash completion (if using `brew`):
 ```sh
@@ -358,7 +367,7 @@ ln -s /Applications/Docker.app/Contents/Resources/etc/docker-machine.bash-comple
 ln -s /Applications/Docker.app/Contents/Resources/etc/docker-compose.bash-completion
 ```
 
-# CICD flow Docker Multi-container application 
+## CI/CD flow Docker Multi-container application 
 
 1. push code to github
 2. CICD tool (Travis, Jenkins) is triggered to pull from github latest repo
@@ -369,7 +378,7 @@ ln -s /Applications/Docker.app/Contents/Resources/etc/docker-compose.bash-comple
 7. Computer service pull images from the artifactory or docker image repo and deploys the application
 
 
-# Side Notes
+## Side Notes
 
 `--` in bash means the end of the command option to avoid flag conflict, in example below, `--coverage` is for `npm run test` not `docker run`, so we use `--` to break the docker command
 

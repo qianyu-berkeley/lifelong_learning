@@ -37,6 +37,8 @@
 * local setup:
   * Need to download and `export $SPARK_HOME=downloaded_sparkpath`
   * Need to use java8 or 11 so use `export JAVA_HOME=/usr/local/Cellar/openjdk@11/11.0.16`
+  * `export PATH=$PATH:$SPARK_HOME/bin` to enable spark-shell command
+  * `export PYSPARK_PYTHON=python3` to enable pyspark shell
 * GCP Dataproc cluster is a Yarn cluster (AWS EMR)
 * `spark history server` show executions in the past
 * `spark context UI` show event timeline
@@ -172,12 +174,13 @@ Read => Process => Write
 * Spark DataFrame Reader API
 
   ```python
-  spark.read
-    .format("csv")
-    .option("header", "true")
-    .option("path", "path/data/")
-    .option("mode", "failfast")
-    .schema(mySchema)
+  spark.read \
+    .format("csv") \
+    .option("header", "true") \
+    .option("path", "path/data/") \
+    .option("mode", "failfast") \
+    .option("samplingRatio", "0.01) \ #if data size is large we can use this option to sample a small set first for test
+    .schema(mySchema) \
     .load()
     
   #short cut
@@ -282,16 +285,191 @@ Read => Process => Write
     my_df = spark.createDataFrame(my_rdd, my_schema)
     ```
 
-  * Collecting Dataframe rows to driver
   * work with individual row in spark transformation
-  * Note: we cannot assert dataframe in unit test or pytest. We need to bring to driver use `collect()`
+  * Collecting Dataframe rows to driver
+    * we cannot assert dataframe in unit test or pytest. We need to bring to driver use `collect()`
   
     ```python
-    rows = df(...).collect():w
+    rows = df(...).collect()
     
     for row in rows:
       assert row['col'] == value
     ```
+
+* Working with unstructured data
+  * Leverage regex and string transformation
+* Working with Columns (most of the cases)
+  * column string
+    `df.select("col", "col").show()`
+  * column oboject
+    `df.select(column("col1"), col("col2"), df.col3).show()`
+  * string expression or SQL expressions
+    `df.select(expr("to_date(concat(col1, col2), 'yymmdd')"))`
+    or
+    `df.selectExpr("Origin", "Dest", "Distance", "to_date(concat(Year,Month,DayofMonth),'yyyyMMdd') as FlightDate").show(10)`
+  * column object expressions
+    `df.select(to_date(concat("col1", "col2"), 'yymmdd').alias("new_col")).show()`
+  * `withColumn(...)` allow to work on a single column without impact to other columns
+* UDF function
+  * udf function register a python function to spark driver so it can be serielized, send to and used in executors, need to define return type, default is `StringType()`
+    * Register as dataframe udf, use for dataframe column object
+
+      ```python
+      from pyspark.sql.functions import *
+
+      parse_string_udf = udf(parse_string, StringType())
+      df.withColumn("parsed_my_col", parse_string_udf("my_col"))
+      ```
+
+    * Register as a SQL function to the catalog, use for sql expression
+
+      ```python
+      spark.udf.register("parse_string_udf", parse_string, StringType())
+      survey_df3 = survey_df.withColumn("Gender", expr("parse_gender_udf(Gender)"))
+      # create a list of functions registered for SQL function catalog
+      catalog_udfs = [logger.info(r) for r in spark.catalog.listFunctions() if "parse_gender" in r.name]
+      ```
+
+## MISC Transformation Tips and Tricks
+
+* Use a list of tuples (in addition to namedtuple) to quickly generate dataframe without column name, use `toDF()` function to quickly create column name without a schema predefined
+
+  ```python
+  data_list = [("Ravi", "28", "1", "2002"),
+             ("Abdul", "23", "5", "81"), # 1981
+             ("John", "12", "12", "6"), # 2006
+             ("Rosy", "7", "8", "63"), # 1963
+             ("Abdul", "23", "5", "81") # 1981
+            ]
+  raw_df = spark.createDataFrame(data_list).toDF("name", "day", "month", "year") 
+  raw_df.printSchema()
+  ```
+
+* add a new id column with `monotonically_increaseing_id()` build-in function to generate monotoniclly increasing and unique
+
+  ```python
+  df1 = raw_df.withColumn("id", monotonically_increasing_id())
+  ```
+
+* use `case when` and `cast` (inline cast, change schema) expression
+
+    ```python
+    # inline cast
+    df2 = df1.withColumn("year", expr("""
+          case when year < 21 then cast(year as int) + 2000
+          when year < 100 then cast(year as int) + 1900
+          else year
+          end"""))
+
+    # change column schema
+    df2 = df1.withColumn("year", expr("""
+          case when year < 21 then year + 2000
+          when year < 100 then year + 1900
+          else year
+          end""")cast(IntegerType()))
+
+    # change column schema ahead of time
+    df5 = df1.withColumn("day", col("day").cast(IntegerType())) \
+          .withColumn("month", col("month").cast(IntegerType())) \
+          .withColumn("year", col("year").cast(IntegerType())) 
+
+    df6 = df5.withColumn("year", expr("""
+              case when year < 21 then year + 2000
+              when year < 100 then year + 1900
+              else year
+              end"""))
+    ```
+
+* Column change with `when` an alternative to `case when`
+
+    ```python
+    df7 = df5.withColumn("year", \
+                      when(col("year") < 21, col("year") + 2000) \
+                      .when(col("year") < 100, col("year") + 1900) \
+                      .otherwise(col("year")))
+    ```
+
+* drop column with `drop`, drop duplicate `dropDuplicates`, `sort`
+
+    ```python
+    df9 = df7.withColumn("dob", to_date(expr("concat(day,'/',month,'/',year)"), 'd/M/y')) \
+         .drop("day", "month", "year") \
+         .dropDuplicates(["name", "dob"]) \
+         .sort(expr("dob desc"))
+    ```
+
+## Aggregations
+
+* aggregation functions
+  * `avg()`
+  * `count()`
+  * `max()`
+  * `min()`
+  * `sum()`
+
+    ```python
+    invoice_df.select(f.count("*").alias("Count *"),
+                      f.sum("Quantity").alias("TotalQuantity"),
+                      f.avg("UnitPrice").alias("AvgPrice"),
+                      f.countDistinct("InvoiceNo").alias("CountDistinct")
+                      ).show()
+
+    invoice_df.selectExpr(
+          "count(1) as `count 1`",
+          "count(StockCode) as `count field`",
+          "sum(Quantity) as TotalQuantity",
+          "avg(UnitPrice) as AvgPrice"
+      ).show()
+
+    invoice_df.createOrReplaceTempView("sales")
+    summary_sql = spark.sql("""
+            SELECT Country, InvoiceNo,
+                  sum(Quantity) as TotalQuantity,
+                  round(sum(Quantity*UnitPrice),2) as InvoiceValue
+            FROM sales
+            GROUP BY Country, InvoiceNo""")
+    summary_sql.show()
+
+    summary_df = invoice_df \
+        .groupBy("Country", "InvoiceNo") \
+        .agg(f.sum("Quantity").alias("TotalQuantity"),
+              f.round(f.sum(f.expr("Quantity * UnitPrice")), 2).alias("InvoiceValue"),
+              f.expr("round(sum(Quantity * UnitPrice),2) as InvoiceValueExpr")
+              )
+
+    # To make code more readable
+    # Define variable for agg()   
+    NumInvoices = f.countDistinct("InvoiceNo").alias("NumInvoices")
+    TotalQuantity = f.sum("Quantity").alias("TotalQuantity")
+    InvoiceValue = f.expr("round(sum(Quantity * UnitPrice),2) as InvoiceValue")
+
+    exSummary_df = invoice_df \
+          .withColumn("InvoiceDate", f.to_date(f.col("InvoiceDate"), "dd-MM-yyyy H.mm")) \
+          .where("year(InvoiceDate) == 2010") \
+          .withColumn("WeekNumber", f.weekofyear(f.col("InvoiceDate"))) \
+          .groupBy("Country", "WeekNumber") \
+          .agg(NumInvoices, TotalQuantity, InvoiceValue)
+    ```
+  
+  Note: `count("*")` or `count(1)` will cound null values whereas `count(col)` will not count null values
+* window functions
+  * `lead()`
+  * `lag()`
+  * `rank()`
+  * `dense_rank()`
+  * `cume_dist()`
+
+## Spark Join
+
+* `left_df.join(right_df, join_expr, join_type)`
+* To avoid ambigious column name error
+  * rename cols:w
+  * before join
+  * drop ambigious cols after join
+* optimize join because spark join it is expensive due to the distributed system, 2 common types
+  * Shuffle join (unique join key determine how many executor can be leveraged for parallelizm)
+  * Broadcast join (a small table to join a very large table)
+    `join_df = df1.join(broadcast(df2, join_expr, "inner")`
 
 ## Learning Reference:
 
