@@ -131,7 +131,7 @@
   * Aggregation window has nothing to do with trigger time (which is the time we start processing a micro-batch)
   * time window nothing but an aggregation column
   * `Tumbling Time` window: a series of fixed size, **non-overlapping** windows
-    * if a record is late, spark would use the state information to update the right aggregation window with the record
+    * if a record is late, spark would use the saved state information to recompute and update the right aggregation window with the record based on event time
 
     ```python
     window_agg_df = df \
@@ -143,6 +143,28 @@
     * limitation: cannot perform running total type of analytical aggregations. The solution is to create a seperate batch processing to perform those type of transformations.
 
   * sliding time window
+* Watermark
+  * a watermark is the expiration time for saved states, a key for state store cleanup
+  * events within the watermark is taken, event outside may or may not be taken
+  * How to set watermark? ask
+    * What is the maximum possible delay?
+    * When late records are not relevant?
+      e.g. we want accuracy >= 99.99%, we don't care records after 30 mins
+
+    ```python
+    # define watermark before the groupby, use the same time column of groupby
+    window_agg_df = df \
+      .withWatermark("CreatedTime", "30 minute") \
+      .groupBy(window(col("createdTime"), "15 minute")) \
+      .agg(sum("Buy").alias("Totalbuy"), 
+           sum("Sell").alias("Totalsell"))
+    ```
+
+    * Max(Event Time) - Watermark = Watermark Boundry => State earlier than watermark boundry will be cleaned.
+    * Output modes:
+      * if set `complete` mode, spark will try to give complete output therefore does not use watermark for cleaning
+      * if set `update` mode, spark will use water mark to clean the state, it is **most useful** output mode for streaming aggregation. But do not use this mode for append only sinks (e.g. file sink), it will create duplicated records. Use with sinks support upsert operations.
+      * `append` mode can work with watermark, spark will suppress the output of the window aggregates until it pass the watermark boundry to maintain record (We can use with file sink with delay)
 
 ## Reference:
 
