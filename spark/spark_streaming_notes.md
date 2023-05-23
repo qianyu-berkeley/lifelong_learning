@@ -114,7 +114,35 @@
   * Need to perform impact analysis before code change regardless whether spark allows it.  * Need
     to perform impact analysis before code change regardless whether spark allows it.
   
-  
+## Windowing and Aggregates
+
+* Stateless vs. Stateful transformations
+  * stateless: `select()`, `filter()`, `map()`, `flatMap()`, `explode()`
+    * complete output mode is not supported
+  * stateful: `grouping`, `aggregation`, `windowing`, `joins` 
+    * need to maintain states across micro-batch
+    * excessive state causes out of memory
+    * spark support 2 stateful operations:
+      * Managed stateful operation (spark manage the clean-up)
+        * Time-bound aggregation is a good candidate for spark to manage the clean up
+      * unmanaged stateful operations (only allowed in java and scalar)
+        * continuous aggregation need to have a user defined clean-up
+* Window aggregates
+  * Aggregation window has nothing to do with trigger time (which is the time we start processing a micro-batch)
+  * time window nothing but an aggregation column
+  * `Tumbling Time` window: a series of fixed size, **non-overlapping** windows
+    * if a record is late, spark would use the state information to update the right aggregation window with the record
+
+    ```python
+    window_agg_df = df \
+      .groupBy(window(col("createdTime"), "15 minute")) \
+      .agg(sum("Buy").alias("Totalbuy"), 
+           sum("Sell").alias("Totalsell"))
+    ```
+
+    * limitation: cannot perform running total type of analytical aggregations. The solution is to create a seperate batch processing to perform those type of transformations.
+
+  * sliding time window
 
 ## Reference:
 
