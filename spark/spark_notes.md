@@ -471,6 +471,111 @@ Read => Process => Write
   * Broadcast join (a small table to join a very large table)
     `join_df = df1.join(broadcast(df2, join_expr, "inner")`
 
+-------
+# Advanced Topics
+
+## Spark Architecture
+
+### Spark cluster and runtime architecture
+
+* Spark is a distributied computing platform
+* Spark appliction is a distributed application and needs a cluster
+* Cluster tech for spark
+  * Hadoop YARN
+  * kubernetes
+* A cluster has number of workders managed by e.g. YARN resource manager
+  * A spart submit will send to YARN resource manager
+  * It will start a application master container on a one worker node
+* Python wrapper on top of java wrapper on top of spark core (scala)
+  * my pyspark code will start a JVM
+  * pyspark driver use py4j to call JVM (java wrapper) which runs scala code
+  * i.e. pyspark driver use py4j to start JVM application driver
+  * If written in scala, we will only have application driver
+* Driver creates and start executors to perform data processing
+* If you use other python libary outside of pyspark, it creates python workers at each excutor (i.e it needs a python runtime environment to execute python code)
+* 3 types:
+  * pyspark only
+    ![image2](reference_materials/pyspark_only.png)
+  * pyspark with other python library
+    ![image3](reference_materials/pyspark_python.png)
+  * scala
+    ![image4](reference_materials/scala_only.png)
+
+### Spark Submit
+
+* Spark-summit is a command line tool to submit spark application to the cluster
+* syntax
+
+  ```bash
+  spark-submit:
+    --class (not applicaable for PySpark)
+    --master <yarn, local[3]>
+    --deploy-mode <client or cluster>
+    --conf <e.g. spark.executorm.meoryOverhead=0.20>
+    --driver-cores <2>
+    --driver-memory <8G>
+    --num-executors <4>
+    --executor-cores <4>
+    --executor-memory <16G>
+  ```
+
+### Spark deploy modes
+
+* Cluster Mode: `spark-submit --master yarn  --deploy-mode cluter`
+  * spark submit will ask YARN resource manager to run application from an AM container
+  * spark driver is in the cluster
+
+
+* Client Mode: `spark-submit --master yarn  --deploy-mode client`
+  * spark application is a JVM application on user's machine
+  * spark driver is on client machine
+  * e.g. spark-shell, notebooks, interactive mode, debug
+
+
+* We almost **always** use cluster mode because
+  * No dependency on client machine
+  * Better performance
+
+### Spark Jobs - Stages, Shuffle, Task, Slots
+
+* Spark dataframe API categories
+  * Transformations
+    * Narrow dependency
+      * performed in parallel on data partitions independently
+      * example: select(), filter(), withColumn(), drop()
+    * Wide dependency
+      * Performed after grouping data from multiple partitions
+      * Example: groupBy(), join(), cube(), rollup() and agg(), repartition()
+  * Actions:
+    * Used to trigger some work (Job)
+    * A `block` ends with an action
+    * Example: read(), write(), collect(), take(), and count()
+
+Note: `count()` on a plain dataframe is an action. All other places suc as `groupBy` dataframe or in agg method is a transformation
+
+* Job plan
+
+  * Spark will create a plan for each block of action
+  * Spark will then break a plan into stages for each wide dependency transformation
+  * Spark will execute each stage in order since we cannot execute them in parallele since the ouptut of one stage is the input for the next stage
+    * output of a stage will be written into an exchange buffer (Write Example)
+    * Input for the next stage is a Read exchange
+    * To pass from one stage to next stage, spark perform `shuffle/sort` operation because the end of a stage is a wide dependency tranformation
+  * Summary:
+    1. spark create a job for each action which may contain series multiple transformations
+    2. spark engine will optimize those transformation and create a logic plan for the job
+    3. spark will break the plan into  multiple stages at the end of every wide dependnecy (if you don't have wide dependency transformation, it will be single stage plan)
+    4. If you have n wide dependency, you will have n+1 stages
+    5. data from one stage to next are shared using shuffle/sort operation
+    6. each stage can have one or more parallel tasks, the number of tasks of the stages is equal to the number of input partitions
+    7. **task** is the most important concept for a spark job which is the smallest unit of work in a spark job
+    8. a task is send an executor to execute, an executor needs the task code and data parition to perform the task
+    9. `Slots` (cpu thread) is the compute resources of executors for a task depending on the resource config
+    10. task will send transformed data parition to driver, when driver collect all the successful tasks (if task failed, driver will perform retry) for performing the action
+
+* Spark SQL consider each query as a spark job
+  * both dataframe API and spark SQL api will use Spark SQL engine for logical plan
+
 ## Learning Reference:
 
 * [Spark Programming](https://github.com/LearningJournal/Spark-Programming-In-Python.git)

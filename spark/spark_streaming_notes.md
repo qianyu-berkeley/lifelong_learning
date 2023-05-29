@@ -131,6 +131,7 @@
   * Aggregation window has nothing to do with trigger time (which is the time we start processing a micro-batch)
   * time window nothing but an aggregation column
   * `Tumbling Time` window: a series of fixed size, **non-overlapping** windows
+    * each event can be part of only 1 window
     * if a record is late, spark would use the saved state information to recompute and update the right aggregation window with the record based on event time
 
     ```python
@@ -142,7 +143,17 @@
 
     * limitation: cannot perform running total type of analytical aggregations. The solution is to create a seperate batch processing to perform those type of transformations.
 
-  * sliding time window
+  * sliding time window (**overlapping**)
+    * to compute moving aggregates
+    * each events can be part of multiple sliding window
+
+    ```python
+    window_agg_df = df \
+      .groupBy(window(col("createdTime"), "15 minute", "5 minute")) \
+      .agg(sum("Buy").alias("Totalbuy"), 
+           sum("Sell").alias("Totalsell"))
+    ```
+
 * Watermark
   * a watermark is the expiration time for saved states, a key for state store cleanup
   * events within the watermark is taken, event outside may or may not be taken
@@ -165,6 +176,101 @@
       * if set `complete` mode, spark will try to give complete output therefore does not use watermark for cleaning
       * if set `update` mode, spark will use water mark to clean the state, it is **most useful** output mode for streaming aggregation. But do not use this mode for append only sinks (e.g. file sink), it will create duplicated records. Use with sinks support upsert operations.
       * `append` mode can work with watermark, spark will suppress the output of the window aggregates until it pass the watermark boundry to maintain record (We can use with file sink with delay)
+
+## Spark Streaming Join
+
+* Streaming Dataframe to static dataframe (stream enrichment)
+  * Stateless
+  * Approach:
+    * Create streaming dataframe from kafka
+    * Create static dataframe from the database table (cassandra)
+    * perform streaming join
+    * write back to the database (e.g. cassandra)
+  * Need to set:
+    * connection to database either using option or set in config
+
+  ```python
+  join_expr = login_df.login_id == user_df.login_id
+  join_type = "inner"
+  joined_df = login_df.join(user_df, join_expr, join_type) \
+    .drop(login_df.login_id)
+  output_df = joined_df.select(col("login_id"), col("user_name"),
+                               col("created_time").alias("last_login"))
+
+  # use following appraoch to sink source if there is no predefined sink
+  # we define a custom function "write_to_cassandra"
+  output_query = output_df.writeStream \
+    .foreachBatch(write_to_cassandra) \
+    .otuputMode("update") \
+    .option("checkpointLocation", "chk-pint-dir") \
+    .option(processingTime="1 minute") \
+    .start()
+    
+  def write_to_cassandra(target_df, batch_id):
+    target_df.write \
+      .format("org.apache.spark.sql.cassandra") \
+      .option("keyspace", "spark_db")
+      .option("table", "users") \
+      .mode("append") \
+      .save()
+    target_df.show()
+  ```
+
+* stream to stream join 
+  * Stateful
+    * Records (from both streaming df) is kept in stateful store to ensure one to many join
+    * spark does not know when to clean the states
+    * duplicate event can cause incorrect results, it is up to user to ensure it does not happen
+  * Approach:
+    * Reading from 1st kafka topic to a streaming dataframe
+    * Reading from 2nd kafka topic to a streaming dataframe
+    * perform streaming join
+    
+    ```python
+    join_expr = "ImpressionID == ClickID"
+    join_type = "inner"
+    
+    joined_df = impressions_df.join(clicks_df, expr(join_expr), join_type)
+    output_query = joined-df.writeStream \
+      .format("console") \
+      .outputMode("append")
+      .option("checkpointLocation", "chk-pint-dir") \
+      .option(processingTime="1 minute") \
+      .start()
+    ```
+
+  * Add watermark to clean up stateful store when generate the streaming dataframe
+
+  ```python
+  impressions_df = kafka_impression_df \
+    .select(from_json(col("value").cast("string"), impressionSchema).alias("value")) \
+    .selectExpr("value.ImpressionID", "value.CreatedTime", "value.Campaigner") \
+    .withColumn("ImpressionTime", to_timestamp(col("CreatedTime"), "yyyy-MM-dd HH:mm::ss")) \
+    .drop("CreatedTime") \
+    .withWatermark("ImpressionTime", "30 minute")
+  ```
+  
+   clean up state store after 30 mins
+
+  * Spark does not garanttee that records outside of water mark will be 100 ignore but spark will garaunttee that the records inside the watermark will be available
+
+* Streaming outer join
+  * streaming outer join with a streaming datafram and static dataframe
+    * Left outer: left side must be a stream
+    * Right outer: Right side must be a stream
+  * streaming outer join between 2 streaming dataframe
+    * watermarket is mandatary to ensure both all outer join works
+    * left outer
+      * watermark on the right-side stream
+      * Max time range constraint between and left and right-side events
+    * right outer
+      * watermark on the left-side stream
+      * Max time range constraint between and left and right-side events
+
+  ```python
+  join_expr = "ImpressionID == ClickID" + \
+            " AND ClickTime Between ImpressionTime AND ImpressionTime + interval 15 minute"
+  ```
 
 ## Reference:
 
