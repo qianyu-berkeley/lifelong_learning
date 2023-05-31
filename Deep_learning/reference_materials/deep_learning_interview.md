@@ -1,4 +1,5 @@
 # Kindergarten
+
 ## Logistic Regression
 
 **Key Concepts**
@@ -915,3 +916,42 @@ $$\hat{p} = argmax(L(p ; n, x))$$
 What is the relationship between the likelihood function and the log-likelihood function?
 
 log function break multiplication to sum
+
+
+
+# Highschool
+
+## information theory
+
+* Information Entropy
+  * Expected Value: $E[x] = \sum^n_{i=1}x_iP(x_i)$ weighted average outcome
+  * PMI (Pointwise Mutual Inforamtion): how much knowing one outcome tells you about another
+    * $$\text{PMI}(x, y) = \log_2\frac{p(x, y)}{p(x)\ p(y)}$$
+    * if x, y are indepdent, PMI = 0 as P(x, y) = 0
+
+  * Entropy (Shannon entropy) is how 'uncertain' the outcome of some experiment is. 
+    * The more uncertain the more spread out the disbribution, the higher the entropy
+    * $$\text{Entropy}(X) = H(X) = -\Sigma_x\ p(x) \log_2 p(x)$$
+    * to find expected value $E[log_2{p(x)}]$ for the probability distribution
+    * Example: BinaryEntropy (coin flip)
+      * BinaryEntripy(p = 0) = 0.0 always get tail, no uncertainty
+      * BinaryEntropy(p = 0.5) = 1.0 max uncertainty (note that entropy value can be infinitely large)
+    * entropy is the average number of bits per message going across the wire given that you optimally designed your encoding ($-log_2P(x)$) in general case
+  * Cross Entropy
+    * The expected value for the number of bits you'd put on the wire in the case where you send messages with probability $P(X)$ but designed an optimal code with $Q(X)$
+    * $H(X) = CrossEntropy(P, Q) = -\sum_x P(X) log_2 Q(x)$
+    * crossEntropy is 0 if P match Q (prediction match the class)
+  * KL Divergence
+    * the size of the *penalty* for using the wrong distribution to optimize our code).  That difference is known as the [Kullback–Leibler divergence](https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence), or KL divergence for short.
+    * It is a measure of how different two probability distributions are.  The more $Q$ differs from $P$, the worse the penalty would be, and thus the higher the KL divergence.
+    * $ D_{KL}(P\ ||\ Q) = CE(P, Q) - H(P)$
+    * $D_{KL}(P\ ||\ Q) \ne D_{KL}(Q\ ||\ P)$ not symmetric
+
+
+    
+
+
+
+
+  * E(symbol_encoding_length) = sum(p(symbol)) * symbol_length)
+  * nub of bits needed = -log(p(symbol))

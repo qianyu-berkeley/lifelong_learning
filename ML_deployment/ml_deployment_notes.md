@@ -111,6 +111,73 @@
 * MLflow Projects
 * MLflow Models
 * Model Regsitries
+* Model Management enables:
+  * Container-based REST servers
+  * Continuous deployment using Spark streaming
+  * Batch
+  * Managed cloud platforms such as Azure ML and AWS SageMaker
+  * **Packaging the final model in a platform-agnostic way offers the most flexibility in deployment options and allows for model reuse across a number of platforms.**
+
+* Model packaging
+  * The main abstraction in this package is the concept of flavors
+    * A flavor is a different ways the model can be used
+    * For instance, a TensorFlow model can be loaded as a TensorFlow DAG or as a Python function
+    * Using an MLflow model convention allows for both of these flavors
+* The difference between projects and models is that models are for inference and serving
+* The python_function flavor of models gives a generic way of bundling models
+  * Building [flavors](https://mlflow.org/docs/latest/python_api/index.html):
+    * mlflow.pyfunc ([ref](https://mlflow.org/docs/latest/python_api/mlflow.pyfunc.html#pyfunc-create-custom))
+    * mlflow.keras
+    * mlflow.pytorch
+    * mlflow.sklearn
+    * mlflow.spark
+    * mlflow.tensorflow 
+    * Their meta information is store in `MLmodel` as part of mlflow model artifact
+  * `pyfunc` is a generic object can be deployed using any platform including mlflow, Sagemaker, Spark UDF, etc
+    * [XGboost Ref](https://github.com/mlflow/mlflow/blob/master/docs/source/models.rst#example-saving-an-xgboost-model-in-mlflow-format)
+
+* Model registery and deployment stages
+  * The MLflow Model Registry defines several model stages: `None`, `Staging`, `Production`, and `Archived`
+  * We can use mlflow client to update model version and stage
+  
+    ```bash
+    %sh curl -i -X POST -H "X-Databricks-Org-Id: <YOUR_ORG_ID>" -H "Authorization: Bearer <YOUR_ACCESS_TOKEN>" https://<YOUR_DATABRICKS_WORKSPACE_URL>/api/2.0/preview/mlflow/transition-requests/create -d '{"comment": "Please move this model into production!", "model_version": {"version": 1, "registered_model": {"name": "power-forecasting-model"}}, "stage": "Production"}'
+    ```
+    
+    ```python
+    client.transition_model_version_stage(
+      name=model_details.name, 
+      version=model_details.version, 
+      stage='Production',
+    )
+    ```
+
+* Stream prediction
+  * create spark UDF of the model with mlflow.pyfunc
+  * generate prediction on stream df
+  
+  ```python
+  import mlflow.pyfunc
+
+  pyfunc_udf = mlflow.pyfunc.spark_udf(spark, URI + "/random-forest-model")
+  predictionsDF = streamingData.withColumn("prediction", pyfunc_udf(*streamingData.columns))
+
+  # Wait until the stream is actually ready for processing.
+  untilStreamIsReady(myStreamName)
+  stopAllStreams()
+
+  # if write to a table
+  predictionsDF
+    .writeStream                                           # Write the stream
+    .queryName(myStreamName)                               # Name the query
+    .format("delta")                                       # Use the delta format
+    .partitionBy("zipcode")                                # Specify a feature to partition on
+    .option("checkpointLocation", checkpointLocation)      # Specify where to log metadata
+    .option("path", writePath)                             # Specify the output path
+    .outputMode("append")                                  # Append new records to the output path
+    .start()                                               # Start the operation
+  ```
+
 
 ### Sagemaker
 
