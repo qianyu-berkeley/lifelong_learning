@@ -270,3 +270,67 @@ $$R^2 = \dfrac{\text{var}(X \hat \beta)}{\text{var}(Y)} = 1 - \dfrac{\sum_i (y_i
   * If we have a rich feature set, more data will help
     * We can use low bias algorithm (such as XGBoost or NN) to fit better 
     * but we may face overfitting, therefore formulate a regularization strategy
+
+## Data Drift
+
+There are three main types of change to worry about in machine learning:
+
+1. **Concept drift**
+
+  * The statistical properties of the _target variable_ change
+  * Example: a new fraud strategy you haven't seen in the past
+
+2. **Data drift**
+
+  * The statistical properties of the _input variables_ change
+  * Example: seasonality of the data or changes in personal preferences
+
+3. **Upstream data changes**
+
+  * Encoding of features change or missing values
+  * Example: Fahrenheit is now encoded as Celsius
+  * Delta Expectations help handle these upstream changes
+  
+Additional detail could be added by distinguishing between label, prediction, and concept drift depending on whether the source of drift is the probability distribution of the true label, the model’s predictions, or unaccounted for outside factors. In practice, however, these different sources of drift often demand similar responses.
+
+There are two basic categories of solutions...
+
+* The first adapts the learner regardless of whether drift has occurred
+  * This solution would include some notion of memory
+  * Filtering for a certain time window (e.g. all data from the past week)
+  * Using weighted examples (e.g. this month's data is weighted twice as important as last month's)
+  * The main challenge with this option is choosing the best window or filtering method
+* Without the ability to actively detect drift, it somewhat arbitrarily selects that threshold
+
+The second solution adapts the learner when it detects drift...
+
+* An adaptive solution is ideal since it can detect the optimal time for retraining
+* Will make more data available to the learner, improving model performance
+
+
+There are a number of statistical methods applicable to drift detection. Create time windows over your data and compute the following basic statistics:
+
+* Mean
+* Min
+* Max
+* Variance
+* Percent missing values
+
+For more rigorous comparisons, consider the following methods:
+
+* Numerical features: two-sample Kolmogorov-Smirnov (KS), Mann-Whitney, or Wilcoxon tests.
+  * Note: do a check of normalcy and choose the appropriate test based on this (e.g. Mann-Whitney is more permissive of skew) 
+* Categorical features: Chi-squared test
+* Pearson coefficient to show correlation changes between features and target
+
+### Basic Retraining Solution
+
+Basic solutions to the issue of drift can include the following:
+
+ * Retrain the model periodically on all new and historical data
+ * Retrain the model on a known window of data (e.g. the last week of data)
+ * Retrain the model while weighing more recent data more strongly
+ 
+The naive implementation of this might look for a 10% slip in error before raising an alarm. A more rigorous approach would look to quantify the shift in context. These approaches often look at the confidence intervals for a given outcome such as the label. When a threshold is reached, it is said that the data is originating from a new context
+
+package: [`skmultiflow`](https://scikit-multiflow.readthedocs.io/en/stable/user-guide/core-concepts.html)
