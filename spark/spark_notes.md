@@ -576,6 +576,79 @@ Note: `count()` on a plain dataframe is an action. All other places suc as `grou
 * Spark SQL consider each query as a spark job
   * both dataframe API and spark SQL api will use Spark SQL engine for logical plan
 
+## Spark Performance
+
+### Spark Memory Allocation
+
+* YARN resource mamanger will allocation an application master container and start the driver JVM in the container
+* The driver will start some memory allocation based on user request
+  * `spark.driver.memory = 1GB`
+  * `spark.driver.memoryOverhead = 0.01`
+  * allocation 1GB JVM memory, allocation 384MB (10% 1GB round to a predefined bound) to container overhead
+  * The overhead memory is for container to process any non-JVM process within the container
+* Memory allocated for executor is the sum of
+  * overhead memory set by `spark.executor.memoryOverhead = 0.1`
+  * heap memory set by `spark.executor.memory = 8G`
+  * off heap memory set by `spark.memory.offHeap.size = 0`
+  * pyspark memory set by `spark.executor.pyspark.memory = 0`
+  * each executor will bet 8.8GB containers
+  * But one should check the excutor max phyiscal memory limit before set config to request memory. Check use
+    * What is the physical memory limit at the worker node?
+      * look for  `yarn.scheduler.maximum-allocation-mb`
+    * `yarn.nodemanager.resource.memory-mb`
+* What is the PySpark executor memory?
+  * pyspark cannot get JVM memory, it can only use overhead memory will share with other non-JVM memory (e.g. network buffering)
+  
+### Spark Memory Management
+
+* JVM heap memory setup by (e.g. `spark.executor.memory = 8GB, spark.executor.cores=4`)
+  * memory Breakdown to:
+    * Spark Reserved memory (300 MB): this is fixed for spark core
+    * Spark Memory 60% of remaining: `spark.memory.fracion = 0.6`
+      * further break into storage memory (caching dataframe) and executor memory (buffer memory for dataframe operation) split 50/50 by default
+      * Spark dataframe Operations and caching
+    * User Memory 40% of remaining: leftover
+      * non dataframe operations such as UDF, spark internal metadata, RDD operations
+  * cpu core is slots (4 in this example)
+    * each slot is a thread
+    * allocate memory to threads based on active tasks
+    * `spark.executor.score` should not go beyond 5 cores which cause excessive memory management overhead and contention
+  * additonal setting for offheap memory
+    * `spark.memory.offHeap.enabled` : to enable usage of offHeap memory
+    * `spark.memory.offHeap.size`: to enable usage of offHeap memory
+    * `spark.executor.pyspark.memory`: add offheap extra memory for python workers
+
+
+### Spark Adaptive Query Execution
+
+* AQE will take care of the needs for user to manually define `spark.sql.shuffle.partitions` becuase the partition can be dynamic, manually defines it may case extra black partition and skewed data partition that add to the performance overhead
+* features of AQE
+  * Dynamically coalescing shuffle partitions
+  * Dynamically switching join strategies
+  * Dynamically optimizing skew joins
+* To enable AQE
+  
+  ```python
+  # AQE configuration
+  spark.sql.adaptive.enabled = true
+  #spark.sql.adaptive.coalescePartitions.initialPartitionNum
+  #spark.sql.adaptive.coalescePartitions.minPartitionNum
+  #spark.sql.adaptive.adisoryPartitionSizeInBytes # default is 64MB
+  #spark.sql.adaptive.coalescePartitions.enabled # default is true
+  ```
+
+* Dynamically switching join strategies
+* Dynamically optimizing skew joins
+  * `spark.sql.adaptive.enabled=true`
+  * `spark.sql.adaptive.skewJoin.enabled=true`
+  * `spark.sql.adaptive.skewJoin.skewedPartitionFactor=5` threshold to determine skewness
+  * `spark.sql.adaptive.skewJoin.skewedPartitionFactorThresholdInByte=256MB` threshold to determine skewness
+  * split large partition into 2 and match on both side to allow consume uniform resources
+
+### Spark Dynamic Partition Pruning (DPP) in Spark 3.0
+
+* This is enabled by default (`spark.sql.optimizer.dynamicPartitionPruning.enabled`)
+
 ## Learning Reference:
 
 * [Spark Programming](https://github.com/LearningJournal/Spark-Programming-In-Python.git)
