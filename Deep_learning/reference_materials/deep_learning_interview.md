@@ -931,7 +931,7 @@ log function break multiplication to sum
 
   * Entropy (Shannon entropy) is how 'uncertain' the outcome of some experiment is. 
     * The more uncertain the more spread out the disbribution, the higher the entropy
-    * $$\text{Entropy}(X) = H(X) = -\Sigma_x\ p(x) \log_2 p(x)$$
+    * $$\text{Entropy}(X) = H(X)= -\Sigma_x\ p(x) \log_2 p(x)$$
     * to find expected value $E[log_2{p(x)}]$ for the probability distribution
     * Example: BinaryEntropy (coin flip)
       * BinaryEntripy(p = 0) = 0.0 always get tail, no uncertainty
@@ -947,11 +947,84 @@ log function break multiplication to sum
     * $ D_{KL}(P\ ||\ Q) = CE(P, Q) - H(P)$
     * $D_{KL}(P\ ||\ Q) \ne D_{KL}(Q\ ||\ P)$ not symmetric
 
-
-    
-
-
-
-
   * E(symbol_encoding_length) = sum(p(symbol)) * symbol_length)
   * nub of bits needed = -log(p(symbol))
+  
+### PRB-68
+
+* $log_{10}3 + log_{10}4 = log_{10}(12)$
+* $log_2(4^6) = 6*log_2(4) = 12$
+* $ln15 - ln3 = ln5$
+
+### PRB-69
+
+* $$\text{Entropy}(X) = H(X)= -\sum^n_{i=1}\ p_i(x) \log_2 p_i(x)$$
+
+### PRB-70
+
+1. For an event which is certain to happen, what is the entropy?
+
+    (b). 0.0
+
+2. For N equiprobable events, what is the entropy?
+    (f) log_2(N)
+
+
+### PRB-71
+
+1. H(X) is always non-negative, since information cannot be lost.
+2. The uniform distribution maximizes H(X), since it also maximizes uncertainty.
+3. The additivity property which relates the sum of entropies of two independent events. For instance, in thermodynamics, the total entropy of two isolated systems which co- exist in equilibrium is the sum of the entropies of each system in isolation.
+
+### PRB-72
+
+Information is an increase in uncertainty
+
+### PRB-73
+
+The **Shannon bit** has two distinctive states; it is either 0 or 1, but never both at the same time. Shannon devised an experiment in which there is a question whose only two possible answers were equally likely to happen.
+
+He then defined one bit as the amount of information gained (or alternatively, the amount of entropy removed) once an answer to the question has been learned. He then continued to state that when the a-priori probability of any one possible answer is higher than the other, the answer would have conveyed less than one bit of information.
+
+### PRB-74
+
+With respect to the notion of surprise in the context of information theory:
+
+1. Define what it actually meant by being surprised: The notion of surprise is directly related to the likelihood of an event happening. Mathem- atically is it inversely proportional to the probability of that event.
+2. Describe how it is related to the likelihood of an event happening.
+In the case where an event is a-priori known to occur for certain (Pa = 1), then no inform- ation is conveyed by it. On the other hand, an extremely intermittent event conveys a lot of information as it surprises us and informs us that a very improbable state exists. 
+3. True or False: The less likely the occurrence of an event, the smaller information it conveys. False
+
+### PRB-75
+
+Assume a source of signals that transmits a given message a with probability Pa. Assume further that the message is encoded into an ordered series of ones and zeros (a bit string) and that a receiver has a decoder that converts the bit string back into its respective message. Shannon devised a formulae that describes the size that the mean length of the bit string can be compressed to. Write the formulae
+
+$$I_{sh} = - \sum_{a}p_alog_2(p_a)$$
+
+mean length in bits,per message can be compressed
+
+### PRB-76
+
+1. 
+   
+   $$-\sum^N_{i=1} (\frac{1}{N})log_2(\frac{1}{N})$$
+   $$ = - N * \frac{1}{N}(- log_2(N)) $$
+   $$ = log_2(N) $$
+
+2. 
+   $$log_2(256) = 8$$
+
+### PRB-77
+
+describe a helpful property of the entropy that follows from the concavity of the logarithmic function.
+
+
+### PRB-78
+
+### PRB-79
+
+### PRB-80
+
+1. Complete the sentence: We can predict ‘heads’ for each flip with an accuracy of %.
+
+0.98*log_2(0.98) + 0.02 * log_2(0.02)
