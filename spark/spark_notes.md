@@ -286,7 +286,7 @@ Read => Process => Write
     ```
 
   * work with individual row in spark transformation
-  * Collecting Dataframe rows to driver
+  * Collecting Dataframe rows from executor to driver => `collect()`
     * we cannot assert dataframe in unit test or pytest. We need to bring to driver use `collect()`
   
     ```python
@@ -540,18 +540,24 @@ Read => Process => Write
 
 * Spark dataframe API categories
   * Transformations
+    * Business logic operations that do NOT induce execution
     * Narrow dependency
       * performed in parallel on data partitions independently
-      * example: select(), filter(), withColumn(), drop()
+      * example: select(), filter(), withColumn(), drop(), intersect()
     * Wide dependency
       * Performed after grouping data from multiple partitions
       * Example: groupBy(), join(), cube(), rollup() and agg(), repartition()
-  * Actions:
+  * Actions (evaluation):
+    * execution triggers forcused on returing results
     * Used to trigger some work (Job)
     * A `block` ends with an action
     * Example: read(), write(), collect(), take(), and count()
 
 Note: `count()` on a plain dataframe is an action. All other places suc as `groupBy` dataframe or in agg method is a transformation
+
+* Shuffle Operation
+  * Repartition the data using the key, keep in the write exchange of the stage (map-side repartition)
+  * redistribution partitioned data to the read stage (aggregation at reduce-side)
 
 * Job plan
 
@@ -601,10 +607,11 @@ Note: `count()` on a plain dataframe is an action. All other places suc as `grou
   
 ### Spark Memory Management
 
+* Spark out-of-memory error occurs when either driver or executor does not have enough memory to collect or process the data allocated to it.
 * JVM heap memory setup by (e.g. `spark.executor.memory = 8GB, spark.executor.cores=4`)
   * memory Breakdown to:
     * Spark Reserved memory (300 MB): this is fixed for spark core
-    * Spark Memory 60% of remaining: `spark.memory.fracion = 0.6`
+    * Spark Memory 60% of 300MB: `spark.memory.fraction = 0.6` is set to use for execution and storage pools
       * further break into storage memory (caching dataframe) and executor memory (buffer memory for dataframe operation) split 50/50 by default
       * Spark dataframe Operations and caching
     * User Memory 40% of remaining: leftover
@@ -617,15 +624,17 @@ Note: `count()` on a plain dataframe is an action. All other places suc as `grou
     * `spark.memory.offHeap.enabled` : to enable usage of offHeap memory
     * `spark.memory.offHeap.size`: to enable usage of offHeap memory
     * `spark.executor.pyspark.memory`: add offheap extra memory for python workers
-
+* Memory tuning
+  * check overhead of garbage collection
+  * check the amount of memory used by your objects
 
 ### Spark Adaptive Query Execution
 
 * AQE will take care of the needs for user to manually define `spark.sql.shuffle.partitions` becuase the partition can be dynamic, manually defines it may case extra black partition and skewed data partition that add to the performance overhead
 * features of AQE
-  * Dynamically coalescing shuffle partitions
-  * Dynamically switching join strategies
-  * Dynamically optimizing skew joins
+  * Dynamically coalescing shuffle partitions (perform coalescing post-shuffle partitions)
+  * Dynamically switching join strategies (convert sort-merge join to broadcast join)
+  * Dynamically optimizing skew joins 
 * To enable AQE
   
   ```python
@@ -645,10 +654,176 @@ Note: `count()` on a plain dataframe is an action. All other places suc as `grou
   * `spark.sql.adaptive.skewJoin.skewedPartitionFactorThresholdInByte=256MB` threshold to determine skewness
   * split large partition into 2 and match on both side to allow consume uniform resources
 
-### Spark Dynamic Partition Pruning (DPP) in Spark 3.0
+### Spark Dynamic Partition Pruning (DPP) in Spark 3.0 enabled by default
 
+* Skp over the data you don't need in a query's results
+* nothing do do with filtering
+* Spark will generate subquery/predicate for partition column when it is used as join key to allow you to read-only required data partitions
 * This is enabled by default (`spark.sql.optimizer.dynamicPartitionPruning.enabled`)
+* Work best
+  * Join fact and dimension tables (one small one large)
+
+### Spark Data Cache
+
+* Spark uses executor memory and storage memory pools
+* How to cache?
+  * Difference between `cache()` and `persist()`: high level they are the same, `cache()` does not take any arguments, it uses the default , `persist()` takes optional argument on storage levels
+  * They are lazy transformations, they only in action if we run an action e.g. `df.count()`, `df.take(10)`, it will smartly only cache what the action is required to access
+  * Order of cache: memory first if not enough got offHeap, if not enough go to disc
+  * Only memory support deserialized format to reduce cpu time with cost of extra memory
+  * There are also predefined StorageLevel constant for configuration instead of defining each arguments (e.g. `DISK_ONLY`, `MEMORY_AND_DISK`)
+  
+  An example that cache() and persist() methods perform the same action
+  ```python
+  # use cache()
+  df = spark.range(1, 10000000).toDF("id") \
+            .repartition(10) \
+            .withColumn("square", expr("id * id")) \
+            .cache()
+            
+  # use persist()
+  df = spark.range(1, 10000000).toDF("id") \
+            .repartition(10) \
+            .withColumn("square", expr("id * id")) \
+            .persist(Storagelevel(useDisk=True, 
+                                 useMemory=True, 
+                                 useOffHeap=False, 
+                                 deserialized=False, 
+                                 replication=1))
+
+  df.count()
+  ```
+* Default storage level for persist() is: `MEMORY_AND_DISK_DESER` or `MEMORY_AND_DISK`
+* How to uncache and when or when not to cache? 
+  * uncache use `df.unpersist()`
+  * Only use cache when we need reuse large dataframe frequent across spark applications
+
+### DataFrame Repartition
+
+* Syntax
+
+  ```python
+  # Hash based partitioning
+  repartition(numPartitions, *col)
+  
+  # Range of values based partitioning
+  # Data sampling to determine partitioning range
+  repartitionByRange(numPartitions, *col)
+  ```
+* `repartitionByRange` may output different partitions when running again because it is based on sampling
+* Examples
+
+  ``` python
+  # Example 1: numPartitions is not provided so it uses shuffleshort default partition conf
+  # partition based on the column order_date
+  # partition based on a column name does not garantee the uniformed partition size
+  order_df = spark.read.parquet("orders") \
+        .repartition("order_date")
+        .cache()
+  ```
+
+* When shall we do repartition?
+  * It cause a shuffle sort which is expensive, so do only with good reason
+  * Common reason:
+    * dataframe reuse and repeat column filters 
+    * existing dataframe partition is not well distrbibuted
+    * large dataframe partition or skewed partition
+  * Do NOT use `repartition` to reduce partition use `coalesce`
+* If you want to reduce partition use `coalesce(n)` method
+  * `coalesce` does not cause shuffle sort
+  * It combines local partition only
+  * It will not increase partitions
+  * It cause skewed partition
+
+### DataFrame Hints
+
+* A way to suggest how SPARK SQL should use specific approach
+* Partition Hints
+  * COALESCE
+  * REPARTITION
+  * REPARTITION_BY_RANGE
+  * REBALANCE
+* JOIN hints
+  * BROADCAST alias BROACASTJOIN or MAPJOIN 
+  * MERGE alias SHUFFLE_MERGE and MERGE_JOIN
+  * SHUFFLE_HASH
+  * SHUFFLE_REPLICATE_NL
+* Syntax
+  * Spark SQL
+
+    ```sql
+    /*+ hint [, ...] */
+    
+    SELECT /*+ COALESCE(3) */ * FROM t;
+    ```
+
+  * How to use in spark dataframe?
+    * Use spark SQL functions
+    * Use dataframe.hint() method
+* Spark will always give higher priority to BROACAST hit over MERGE
+
+### Spark Broadcast variables
+
+* Use in Spark low level api (rdd)
+* Different from broadcast hash joins
+* Use in rare scenarios
+  * shared and immutable data
+  * cached at worker nodes and broadcasted by the driver node
+  * seralized only once per worker
+  * does not need to be shipped or shuffled between nodes with each stage
+
+### Spark Accumulators
+
+* Use in Spark low level api
+* Use in rare scenarios
+  * Global mutable variable
+  * can update them per row basis
+  * can implement counter and sums
+  * can have named accumulators in scala
+  * Named accumulator are visible in Spark UI
+  * You can create custom accumulators
+
+### Speculative Execution
+
+* Set `spark-speculative=true` to enable to spark identify a slow task within multiple parallel tasks, it will create a new duplicated task as speculative task and run a different worker node, spark will kill the slow task and finish the faster one
+* This helps the case where a task is stuck on a faulty worker node
+* It cost extra resources and it does NOT help in data skew and memory crisis
+* Tuning Speculation
+  * `spark.speculation.interval=100ms` check use 100ms rule
+  * `spark.speculation.multiplier=1.5`  check if it is slower than 1.5 of median delay
+  * `spark.speculation.quantile=0.75` percent of tasks to complete before a speculative execution, if a task still struggle when 75% of all task already complete
+  * `spark.speculation.minTaskRuntime=100ms` task need to run minimum 100ms before consider for speculative
+
+### Spark Scheduling
+
+* Scheduling
+* Scheduling across applications
+  * Resource Allocation
+    * Static Allocation: first come first serve, only release resource when a task is complete
+    * Dynamic Allocation: flexible approach, spark application will release the executor if the application is not using it, the app can reacquire executor when needed them. Essentially this allow spark application to release and acquire resource dynamically
+      to enable:
+      `spark.dynamicAllocation.enabled=true`
+      `spark.dynamicAllocation.shuffleTracking.enabled=true`
+      `spark.dynamicAllocation.executorIdleTimeout=60s` => control the release time for available executors
+      `spark.dynamicAllocation.schedulerBacklogTimeout=1s` => control the request time for more executors
+* Scheduling within an application
+  * Spark by default run jobs in sequence
+  * We can use `Thread` to run job in parallel thus we need to handle the scheduling
+  * Spark Job Schedular
+    * FIFO
+      * First job gets highest priority
+      * Consumes as much as needed
+      * Next job gets leftover resources
+    * FAIR
+      * `spark.scheduler.mode=FAIR`
+      * Round robin slot allocation
+
+## Unit Test for Spark
+
+
+
 
 ## Learning Reference:
 
 * [Spark Programming](https://github.com/LearningJournal/Spark-Programming-In-Python.git)
+* [Spark Examples](https://github.com/ScholarNest/PySpark-Examples.git)

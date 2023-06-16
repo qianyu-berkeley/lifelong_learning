@@ -334,3 +334,9 @@ Basic solutions to the issue of drift can include the following:
 The naive implementation of this might look for a 10% slip in error before raising an alarm. A more rigorous approach would look to quantify the shift in context. These approaches often look at the confidence intervals for a given outcome such as the label. When a threshold is reached, it is said that the data is originating from a new context
 
 package: [`skmultiflow`](https://scikit-multiflow.readthedocs.io/en/stable/user-guide/core-concepts.html)
+
+
+### Embedding
+
+* An embedding is a numerical representation of a piece of information, for example, text, documents, images, audio, etc. The representation captures the semantic meaning of what is being embedded, making it robust for many industry applications.
+* We can create embedding for image, (for example, a list of 384 numbers) and compare it with a text embedding to determine if a sentence describes the image. This concept is under powerful systems for image search, classification, description, and more!
