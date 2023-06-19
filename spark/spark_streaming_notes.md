@@ -7,6 +7,12 @@
   * Check points
   * Tracking last processed files
   * fault tolarance
+* Unsupported operations
+  * sorting `orderBy`
+  * `limit`
+  * `distinct`
+  * `count()`
+  * `foreach()`
 
 ## Spark Streaming framework
 
@@ -16,6 +22,11 @@
   * Intermediate state management
   * combine results to the prevous batch results
   * fault tolarance and restart management
+    * End-to-end exactly-once fault tolerance guarantees through checkpointing and write ahead logs
+      * record the offset range of data being processed during each trigger interval
+      * **idempotent** multiple writes of the same data do not result in duplicates being written to the sink
+    * Requirement:
+      * Streaming source is replayable -- cloud-based object storrage and pub/sub messaging services
 
 ## Spark Structured Streaming API
 
@@ -27,10 +38,21 @@
   * Read streaming source  - input dataframe
   * Data Transform - process and transform input dataframe to output dataframe
   * Write to output - streaming sink
-* readStream 
+* `readStream` (returns a `DataStreamReader`)
   * take options of input source (e.g. `socket`, `kafka`, `json`) use option of `host`, `port`, `path`)
   * Can perform operations of standard spark dataframe
-* writeStream take mandortary options of `checkpointLocation` and outputMode (e.g. `complete`)
+  * Config a streaming read on a source requires:
+    * The schema of the data (it is not safe to infer schema, since we assume the source is grow indfinitely from zero)
+      * For pub/hub system like `kafka` or `event hub`, the source will provide schema
+    * The `format` of the source (`file format or named connector`)
+    * Config specific to the source
+      * `kafka`
+      * `Event hubs`
+* `writeStream` (returns a `DataStreamwriter`) take mandortary options of `checkpointLocation` and outputMode (e.g. `complete`)
+  * The `format` of output sink (e.g. `parquet`, `kafka`)
+  * The location of the **checkpoint directory** (Note: checkpoint cannot be shared between seperate streams)
+  * [The output mode](#output-mode)
+  * `start()` or `.start(filepath)` to trigger the job
 * Stream operation typically is expect to run forever until manual stop / kill or exception
 * useful spark session options:
   * use `.config("spark.streaming.stopGracefullyOnShutdown", "true")` to allow stop gracefully
@@ -66,7 +88,18 @@
         * It Add delay to the processing time of microbatch
         * But too much input process file (as it accumulate) would also impact the microbatch, need to periodically clean. We can use a seperate process to clean input
     * Typically minute-based micro-batch
-  * Kafka source
+    * Example:
+
+      ```python
+      streamingDF = spark.readStream \
+                  .format("json") \
+                  .schema(schema) \
+                  # Optional; force processing of only 1 file per trigger 
+                  .option("maxFilesPerTrigger", 1)  \
+                  .load(dataPath)
+      ```
+
+  * Kafka source (or other pub/hub system)
     * By default kafka consumer read from the latest offset, change to `earliest` allows it to read from the beginning at the start
     * Spark maintain the current offset in the checkpoint, startingOffsets will be overwritten in the checkpoint
     * kafka value is in binary, we need to deserialization
@@ -93,8 +126,16 @@
 ## output mode
 
 * `Append`: **insert only**, no update on data from previous microbatch, does not work with aggregation since it does not make sense if only insert
-* `Update`: **upsert** like operation
+* `Update`: **upsert** like operation i.e. only the rows in the result table that were updated since the last trigger will be outputted to the sink
 * `Compele`: **overwrite** the complete results
+
+## Trigger Interval
+
+* triggers are specified when defining how data will be written to a sink and control the frequency of micro-batches.
+* If undefined (default): The query will be executed as soon as the system has completed processing the previous query
+* Fixed Interval micro-batches: `.trigger(Trigger.ProcessingTime("2 minutes"))` The query will be executed in micro-batches and kicked off at the user-specified intervals
+* One-time micro-batch: `.trigger(Trigger.Once())` The query will execute only one micro-batch to process all the available data and then stop on its own
+* Continous w/fixed checkpoint interval: `.trigger(Trigger.Continuous("1 second"))` The query will be executed in a low-latency
 
 ## Fault tolerance and restart
 
@@ -270,6 +311,42 @@
   ```python
   join_expr = "ImpressionID == ClickID" + \
             " AND ClickTime Between ImpressionTime AND ImpressionTime + interval 15 minute"
+  ```
+
+## Other Tools
+
+* Users should define a `StreamingQueryListener`, as demonstrated [here](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#reporting-metrics-programmatically-using-asynchronous-apis).
+* The `StreamingQuery` object can be used to [monitor and manage the stream](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#managing-streaming-queries).
+* The `StreamingQuery` object can be captured as the return of a write definition or accessed from within the active streams list, demonstrated here:
+
+  ```python
+  for s in spark.streams.active:         # Iterate over all streams
+    print(s.id)    
+  print(streamingQuery.recentProgress) # access metadata about recently processed micro-batches
+  ```
+
+* Stop streaming Query
+
+  ```python
+  streamingQuery.awaitTermination(5)      # Stream for another 5 seconds while the current thread blocks
+  streamingQuery.stop()                   # Stop the stream
+  ```
+
+* Within the Databricks notebooks, we can use the `display()` function to render a live plot. This stream is written to memory; **generally speaking this is most useful for debugging purposes**.
+* When you pass a "streaming" `DataFrame` to `display()`, you trigger a streaming job:
+  * A "memory" sink is being used
+  * The output mode is complete
+  * *OPTIONAL* - The query name is specified with the `streamName` parameter
+  * *OPTIONAL* - The trigger is specified with the `trigger` parameter
+  * *OPTIONAL* - The checkpointing location is specified with the `checkpointLocation`
+  * `display(myDF, streamName = "myQuery")`
+
+* Since the `streamName` gets registered as a temporary table pointing to the memory sink, we can use SQL to query the sink.
+* To stop all remaining streams
+
+  ```python
+  for s in spark.streams.active:
+    s.stop()
   ```
 
 ## Reference:

@@ -161,8 +161,8 @@ Read => Process => Write
     * File format
       * CSV
       * JSON
-      * Parquet
-      * AVRO
+      * Parquet (Column oriented: ideal for intensive read operation, efficient in storing large data)
+      * AVRO (Row oriented: Avro format is a row-based storage format for Hadoop, which is widely used as a serialization platform. Avro format stores the schema in JSON format, making it easy to read and interpret by any program. The data itself is stored in a binary format making it compact and efficient in Avro files, good for network, e.g. kafka)
       * Plain TEXT
       * Spark SQL Table
       * Delta Lake
