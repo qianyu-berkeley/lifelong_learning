@@ -155,7 +155,16 @@
   * Need to perform impact analysis before code change regardless whether spark allows it.  * Need
     to perform impact analysis before code change regardless whether spark allows it.
   
+## Time in streaming
+
+* Multiple times definitions in respect to data
+  * **when data is Generated** => `event time`
+  * when data is Written to the straaming source
+  * when data is Processed into Spark  
+* Most analytics will be interested in the time the data was generated
+
 ## Windowing and Aggregates
+
 
 * Stateless vs. Stateful transformations
   * stateless: `select()`, `filter()`, `map()`, `flatMap()`, `explode()`
@@ -166,34 +175,43 @@
     * spark support 2 stateful operations:
       * Managed stateful operation (spark manage the clean-up)
         * Time-bound aggregation is a good candidate for spark to manage the clean up
-      * unmanaged stateful operations (only allowed in java and scalar)
+      * unmanaged stateful operations (only allowed in java and scala)
         * continuous aggregation need to have a user defined clean-up
 * Window aggregates
+  * Defining windows on a time series field allows users to utilize this field for aggregations in the same way they would use distinct values when calling `GROUP BY`. 
   * Aggregation window has nothing to do with trigger time (which is the time we start processing a micro-batch)
-  * time window nothing but an aggregation column
-  * `Tumbling Time` window: a series of fixed size, **non-overlapping** windows
-    * each event can be part of only 1 window
-    * if a record is late, spark would use the saved state information to recompute and update the right aggregation window with the record based on event time
+  * time window is nothing but an aggregation column
+  * The state table will maintain aggregates for each user-defined bucket of time. Spark supports two types of windows:
+    * `Tumbling Time` window: a series of fixed size, **non-overlapping** windows
+      * each event can be part of only 1 window
+      * if a record is late, spark would use the saved state information to recompute and update the right aggregation window with the record based on event time
 
-    ```python
-    window_agg_df = df \
-      .groupBy(window(col("createdTime"), "15 minute")) \
-      .agg(sum("Buy").alias("Totalbuy"), 
-           sum("Sell").alias("Totalsell"))
-    ```
+      ```python
+      window_agg_df = df \
+        .groupBy(window(col("createdTime"), "15 minute")) \
+        .agg(sum("Buy").alias("Totalbuy"), 
+            sum("Sell").alias("Totalsell"))
+      ```
 
-    * limitation: cannot perform running total type of analytical aggregations. The solution is to create a seperate batch processing to perform those type of transformations.
+      * limitation: cannot perform running total type of analytical aggregations. The solution is to create a seperate batch processing to perform those type of transformations.
 
-  * sliding time window (**overlapping**)
-    * to compute moving aggregates
-    * each events can be part of multiple sliding window
+    * sliding time window (**overlapping**)
+      * to compute moving aggregates
+      * each events can be part of multiple sliding window
 
-    ```python
-    window_agg_df = df \
-      .groupBy(window(col("createdTime"), "15 minute", "5 minute")) \
-      .agg(sum("Buy").alias("Totalbuy"), 
-           sum("Sell").alias("Totalsell"))
-    ```
+      ```python
+      window_agg_df = df \
+        .groupBy(window(col("createdTime"), "15 minute", "5 minute")) \
+        .agg(sum("Buy").alias("Totalbuy"), 
+            sum("Sell").alias("Totalsell"))
+      ```
+
+  The diagram below from the <a href="https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html" target="_blank">Structured Streaming Programming Guide</a> guide shows sliding windows.
+  <img src="http://spark.apache.org/docs/latest/img/structured-streaming-window.png">
+  
+  * Performance Consideration
+    * Because aggregation will trigger a shuffle, configuring the number of partitions can reduce the number of tasks and properly balance the workload for the cluster.
+    * In most cases, a 1-to-1 mapping of partitions to cores is ideal for streaming applications. The code below sets the number of partitions to 8, which maps perfectly to a cluster with 8 cores.
 
 * Watermark
   * a watermark is the expiration time for saved states, a key for state store cleanup
@@ -204,12 +222,24 @@
       e.g. we want accuracy >= 99.99%, we don't care records after 30 mins
 
     ```python
+    # Example one
     # define watermark before the groupby, use the same time column of groupby
     window_agg_df = df \
       .withWatermark("CreatedTime", "30 minute") \
       .groupBy(window(col("createdTime"), "15 minute")) \
       .agg(sum("Buy").alias("Totalbuy"), 
            sum("Sell").alias("Totalsell"))
+    
+    # Example 2
+    watermarkedDF = (streamingDF
+      .withWatermark("time", "2 hours")           # Specify a 2-hour watermark
+      .groupBy(col("action"),                     # Aggregate by action...
+               window(col("time"), "1 hour"))     # ...then by a 1 hour window
+      .count()                                    # For each aggregate, produce a count
+      .select(col("window.start").alias("start"), # Elevate field to column
+              col("action"),                      # Include count
+              col("count"))                       # Include action
+      .orderBy(col("start"), col("action"))       # Sort by the start time
     ```
 
     * Max(Event Time) - Watermark = Watermark Boundry => State earlier than watermark boundry will be cleaned.
@@ -313,7 +343,32 @@
             " AND ClickTime Between ImpressionTime AND ImpressionTime + interval 15 minute"
   ```
 
-## Other Tools
+## Databricks Autoloader
+
+* Recommended method for streaming raw data from cloud object storage
+* For small datasets, the default directory listing execution mode will provide provide exceptional performance and cost savings.
+* As the size of your data scales, the preferred execution method is file notification, which requires configuring a connection to your storage queue service and event notification, which will allow Databricks to idempotently track and process all files as they arrive in your storage account.
+* Configuring Auto Loader requires using the `cloudFiles` format.
+
+  ```python
+  stream_job = spark.readStream \
+      .format("cloudFiles") \
+      .option("cloudFiles.format", "json") \
+      .schema(schema) \
+      .load(raw) \
+      .writeStream \
+      .format("delta") \
+      .option("checkpointLocation", gymMacLogsCheckpoint) \
+      .trigger(once=True) \
+      .start("/temp/mac_log/") \
+      .awaitTermination()
+  display(spark.sql(f"DESCRIBE HISTORY delta.`/temp/mac_log`))
+  ```
+
+* auto loader with trigger once logic prevents any CDC (Change Data Capture) on our file system, allowing us to simple trigger a chron job daily to process all new data
+
+
+## Tools
 
 * Users should define a `StreamingQueryListener`, as demonstrated [here](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#reporting-metrics-programmatically-using-asynchronous-apis).
 * The `StreamingQuery` object can be used to [monitor and manage the stream](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html#managing-streaming-queries).
@@ -352,3 +407,4 @@
 ## Reference:
 
 * https://github.com/LearningJournal/Spark-Streaming-In-Python
+* CDC: Change data capture (CDC) refers to the process of identifying and capturing changes made to data in a database and then delivering those changes in real-time to a downstream process or system)
