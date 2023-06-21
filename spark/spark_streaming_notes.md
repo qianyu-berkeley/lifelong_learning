@@ -135,6 +135,10 @@
 * If undefined (default): The query will be executed as soon as the system has completed processing the previous query
 * Fixed Interval micro-batches: `.trigger(Trigger.ProcessingTime("2 minutes"))` The query will be executed in micro-batches and kicked off at the user-specified intervals
 * One-time micro-batch: `.trigger(Trigger.Once())` The query will execute only one micro-batch to process all the available data and then stop on its own
+  * streaming trigger runOnce is better than batch job, why?
+    * Bookkeeping: structured streaming does low-level bookkeeping
+    * Table level atomicity (fault-tolerance: Structured Streaming commits all files created by the job to a log after each successful trigger. When Spark reads back the table, it uses this log to figure out which files are valid.)
+    * Stateful operations across runs: With Structured Streaming, it’s as easy as setting a watermark and using dropDuplicates(). By configuring the watermark long enough to encompass several runs of your streaming job, you will make sure that you don’t get duplicate data across runs.
 * Continous w/fixed checkpoint interval: `.trigger(Trigger.Continuous("1 second"))` The query will be executed in a low-latency
 
 ## Fault tolerance and restart
@@ -252,14 +256,28 @@
 
 * Streaming Dataframe to static dataframe (stream enrichment)
   * Stateless
+  * no watermark or windowing needs to be configured, and distinct keys from the join accumulate over time. Each streaming microbatch joins with the most current version of the static table.
   * Approach:
     * Create streaming dataframe from kafka
-    * Create static dataframe from the database table (cassandra)
+    * Create static dataframe from the database table (e.g. cassandra)
     * perform streaming join
     * write back to the database (e.g. cassandra)
   * Need to set:
     * connection to database either using option or set in config
+  * There's nothing especially complicated about the syntax used for a stream-static join. The primary thing to keep in mind is that our streaming table is driving the action. For each new batch of data we see arriving in streaming table, we'll process our join logic.
+  
+  Example 1
+  ```python
+  silverDF = spark.readStream.table("silver_recordings")
+  piiDF = spark.table("pii")
+  joinedDF = silverDF.join(piiDF, on=["mrn"])
+  joinedDF.writeStream \
+    .trigger(processingTime="5 seconds") \
+    .option("checkpointLocation", enrichedCheckpoint) \
+    .toTable("enriched_recordings")
+  ```
 
+  Example 2
   ```python
   join_expr = login_df.login_id == user_df.login_id
   join_type = "inner"

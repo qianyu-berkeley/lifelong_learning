@@ -16,7 +16,7 @@
 
 * A file based open source technology
 * Benefits
-  * Guarantee ACID transation
+  * Guarantee ACID (atomicity, consistency, isolation, and durability) transation
   * Scalable data and metadata handling for large datatables
   * Audit history and time travel
   * Schema enforcement and schema evolution

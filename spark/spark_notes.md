@@ -71,11 +71,11 @@ Read => Process => Write
 
 ### Partition and Executors
 
-* Dataframe store in partition of HDFS
+* Dataframe store in partitions of HDFS
   * Driver create logical In-Memory partition and orchastrate cluster manager (e.g. Yarn) to assign executors
   * Executors is assigned with partitions to work on
 * Spark dataframe is immutable
-  * driver perform transformations, user intermediate variable to store outcome of transformation
+  * driver perform transformations, use intermediate variable to store outcome of transformation
 
   ```python
     filtered_df = df \
@@ -89,20 +89,21 @@ Read => Process => Write
   * transformations (repartition)
     * narrow dependency: can perform on each partition (e.g. where)
     * wide dependency: require data from other partition (e.g. groupBy, join, orderBy, distinct) => shuffle/sort exchange
-  * actions (e.g. read, write, collect, show)
+  * actions (e.g. read, write, collect, count, show)
   * Lazy evaluation: when we create a dag of spark data operations, driver will optimize the dag, create an execution plan (may not be the same as our code sequence)
     * Transformation is lazy
     * Action is immediate
       * `show` is to print dataframe and mainly used for debugging
       * `Collect` action return the data frame as python list
+    * Benefit of Lazy evaluation: Lazy evaluation enhances the power of Apache Spark by reducing the execution time of the RDD operations. It maintains the lineage graph to remember the operations on RDD. As a result, it Optimizes the performance and achieves fault tolerance.
 
 ## Spark Structured Data Processing API
 
 * RDD APIs (raw, more flexible, but not optmized by Catalyst optimizer, not recommended to use)
-  * Catalyst Optimizer
-  * Dataset API (strongly tie to JVM thus with Scalar and Java)
-  * DataFrame API (python driven)
-  * Spark SQL (SQL driven)
+* Catalyst Optimizer
+* Dataset API (strongly tie to JVM thus with Scalar and Java)
+* DataFrame API (python driven)
+* Spark SQL (SQL driven)
 
 * Spark RDD (Resilient Distributed Dataset) API
   * Fault tolarant (contain meta data on how to recreate partition)
@@ -121,6 +122,7 @@ Read => Process => Write
     countRDD = kvRDD.reduceByKey(lambda v1, v2: v1 + v2)
     countRDD.collect()
     ```
+
   * Raw, more flexible, but not practical
 
 * SparkSQL API
@@ -212,12 +214,14 @@ Read => Process => Write
     * option
     * save
   * How to find number of parition of a dataframe?
+
     ```python
     # show number of partitions
     df.rdd.getNumPartitions()
     # show num of record per partition
     df.gropuby(spark_partition_id()).count().show()
     ```
+
   * control write partition
     * `.repartition(n)` (blindly)
     * `.partitionBy(co1, co2, ...)` break logically
@@ -228,6 +232,7 @@ Read => Process => Write
   * use `option("maxRecordsPerFile", 10000)` to cap file size
   
   * To enable spark to read and write avro file format we need to enable jar in `spark-default.conf`
+
     ```
     spark.jars.packages org.apache.spark:spark-avro_2.11:2.4.5
     ```
@@ -310,6 +315,7 @@ Read => Process => Write
   * column object expressions
     `df.select(to_date(concat("col1", "col2"), 'yymmdd').alias("new_col")).show()`
   * `withColumn(...)` allow to work on a single column without impact to other columns
+
 * UDF function
   * udf function register a python function to spark driver so it can be serielized, send to and used in executors, need to define return type, default is `StringType()`
     * Register as dataframe udf, use for dataframe column object
@@ -329,6 +335,34 @@ Read => Process => Write
       # create a list of functions registered for SQL function catalog
       catalog_udfs = [logger.info(r) for r in spark.catalog.listFunctions() if "parse_gender" in r.name]
       ```
+
+  * Some UDFs are more efficient than others in performance
+    * Build-in function are fastest due to databricks optimizers
+    * code executes in JVM (Scala, java, Hive UDFs) is faster than python UDFs
+    * Pandas UDFs use arrow to reduce serialization costs associated with python UDFs
+    * Python UDFs (slowest) should be avoided for production ETL workloads on large datasets
+  * Pandas UDFs with new *python type hints* in Apache Spark 3.0
+  
+    ```python
+    from pyspark.sql.functions import pandas_udf, PandasUDFType
+
+    @pandas_udf('double', PandasUDFType.SCALAR)
+    def pandas_plus_one(v):
+        # `v` is a pandas Series
+        return v.add(1)  # outputs a pandas Series
+
+    spark.range(10).select(pandas_plus_one("id")).show()
+    ```
+
+    * Supported [use cases](https://www.databricks.com/blog/2020/05/20/new-pandas-udfs-and-python-type-hints-in-the-upcoming-release-of-apache-spark-3-0.html))
+      * Series to Series
+      * Iterator of Series to Iterator of Series
+      * Iterator of Multiple Series to Iterator of Series
+      * Series to Scalar (a single value)
+    * Key to work with the new Pandas UDF
+      * Although Python type hints are optional in the Python world in general, you must specify Python type hints for the input and output in order to use the new Pandas UDFs.
+      * Users can still use the old way by manually specifying the Pandas UDF type. However, using Python type hints is encouraged.
+      * The type hint should use pandas.Series in all cases. However, there is one variant in which pandas.DataFrame should be used for its input or output type hint instead: when the input or output column is of StructType.Take a look at the example below:
 
 ## MISC Transformation Tips and Tricks
 
@@ -472,6 +506,7 @@ Read => Process => Write
     `join_df = df1.join(broadcast(df2, join_expr, "inner")`
 
 -------
+
 # Advanced Topics
 
 ## Spark Architecture
@@ -827,3 +862,4 @@ Note: `count()` on a plain dataframe is an action. All other places suc as `grou
 
 * [Spark Programming](https://github.com/LearningJournal/Spark-Programming-In-Python.git)
 * [Spark Examples](https://github.com/ScholarNest/PySpark-Examples.git)
+* [Pandas UDFs](https://www.databricks.com/blog/2020/05/20/new-pandas-udfs-and-python-type-hints-in-the-upcoming-release-of-apache-spark-3-0.html)
